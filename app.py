@@ -3,7 +3,6 @@ import streamlit as st
 from data_parser import load_match_data, build_match_data
 from report_generator import generate_report
 
-
 st.set_page_config(
     page_title="BKFC Technical Match Intelligence",
     page_icon="⚽",
@@ -15,25 +14,31 @@ st.subheader("Automated Match Analysis & Scouting Report Generator")
 st.markdown("---")
 
 
+# ─────────────────────────────────────────────
+# FILE UPLOADS
+# ─────────────────────────────────────────────
 col1, col2 = st.columns(2)
 
 with col1:
     st.markdown("### 📥 BKFC Data")
-    bkfc_file = st.file_uploader("Upload BKFC Wyscout Season Database (.xlsx)", type=["xlsx"])
+    bkfc_file = st.file_uploader("Upload BKFC Wyscout File (.xlsx)", type=["xlsx"])
 
 with col2:
     st.markdown("### 📥 Opponent Data")
-    opp_file = st.file_uploader("Upload Opponent Wyscout Season Database (.xlsx)", type=["xlsx"])
+    opp_file = st.file_uploader("Upload Opponent Wyscout File (.xlsx)", type=["xlsx"])
 
 
+# ─────────────────────────────────────────────
+# MAIN PIPELINE
+# ─────────────────────────────────────────────
 if bkfc_file and opp_file:
 
     try:
         parsed = load_match_data(bkfc_file, opp_file)
 
-        # ── MATCH DROPDOWN ───────────────────────────────
+        # ── MATCH DROPDOWN ─────────────────────
         match_options = {
-            f"{m['match_date']} | {m['opponent_name']} | {m['competition']}": m
+            f"{m['date']} | {m['opponent']} | {m['competition']}": m
             for m in parsed["matches"]
         }
 
@@ -44,32 +49,35 @@ if bkfc_file and opp_file:
 
         parsed["selected_match"] = match_options[selected_label]
 
-        data = build_match_data(parsed, opp_file)
+        # convert to report-ready structure
+        data = build_match_data(parsed)
 
-        st.success(f"Loaded: {data['match_title']}")
+        # ── MATCH INFO DISPLAY ──────────────────
+        st.success(f"Loaded Match: {data['match_title']}")
 
-        # ── METADATA ─────────────────────────────────────
         colA, colB, colC = st.columns(3)
-        colA.metric("Competition", data["competition"])
+        colA.metric("Opponent", data["opponent_name"])
         colB.metric("Date", data["match_date"])
         colC.metric("Score", data["score"])
 
         st.markdown("---")
 
-        confirm = st.checkbox("Confirm match selection")
+        # quick sanity check
+        st.write("Goals (BKFC):", data["match_bkfc"]["Goals"])
+
+        confirm = st.checkbox("Confirm selection before generating report")
 
         if confirm:
-            if st.button("Generate Report Deck", use_container_width=True):
+
+            if st.button("Generate Match Report", use_container_width=True):
 
                 with st.spinner("Building tactical report..."):
                     report_stream = generate_report(data)
 
-                    clean_name = data["opponent_name"].replace(" ", "_")
-                    filename = f"BKFC_vs_{clean_name}_report.pptx"
+                filename = f"BKFC_vs_{data['opponent_name'].replace(' ', '_')}.pptx"
 
-                st.success("Report generated successfully!")
                 st.download_button(
-                    "Download PPTX",
+                    "Download PowerPoint Report",
                     data=report_stream,
                     file_name=filename,
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
