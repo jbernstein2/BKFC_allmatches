@@ -1,10 +1,7 @@
 import pandas as pd
 import re
 
-# --------------------------------------------------
-# STATS (UNCHANGED — KEEP YOUR EXISTING VERSION)
-# --------------------------------------------------
-
+# ── METRICS MAP ─────────────────────────────────────────────
 STATS = [
     {"label": "Goals", "col": 6},
     {"label": "xG (Expected Goals)", "col": 7},
@@ -14,140 +11,100 @@ STATS = [
     {"label": "Possession %", "col": 14},
     {"label": "Passes", "col": 11},
     {"label": "Pass Accuracy %", "col": 13},
-    {"label": "Positional Attacks", "col": 29},
-    {"label": "Positional Attacks w/ Shots", "col": 30},
-    {"label": "Counterattacks", "col": 32},
     {"label": "Corners", "col": 38},
-    {"label": "Set Pieces w/ Shots", "col": 36},
-    {"label": "Duels Won %", "col": 25},
-    {"label": "Crosses", "col": 47},
-    {"label": "Cross Accuracy %", "col": 49},
-    {"label": "Touches in Penalty Area", "col": 55},
-    {"label": "Offensive Duels Won %", "col": 58},
-    {"label": "Defensive Duels Won %", "col": 66},
-    {"label": "Aerial Duels Won %", "col": 69},
     {"label": "Interceptions", "col": 73},
     {"label": "Clearances", "col": 74},
     {"label": "Fouls", "col": 75},
-    {"label": "Yellow Cards", "col": 76},
-    {"label": "Shots Against", "col": 61},
     {"label": "PPDA", "col": 108},
 ]
 
-# --------------------------------------------------
-# MATCH DISCOVERY FUNCTION (NEW)
-# --------------------------------------------------
 
-def get_available_matches(bkfc_file):
-    """
-    Builds dropdown list of all matches in BKFC workbook.
-    Each match = BKFC row + Opponent row (every 2 rows).
-    """
+# ── CORE PARSER ─────────────────────────────────────────────
+def load_match_data(bkfc_file, opponent_file):
+    bkfc_df = pd.read_excel(bkfc_file, header=None, engine="openpyxl")
+    opp_df = pd.read_excel(opponent_file, header=None, engine="openpyxl")
 
-    bkfc_file.seek(0)
-
-    df = pd.read_excel(
-        bkfc_file,
-        header=None,
-        engine="openpyxl"
-    )
-
-    matches = []
-
-    for i in range(3, len(df), 2):
-        try:
-            bkfc_row = df.iloc[i]
-
-            if pd.isna(bkfc_row[0]):
-                continue
-
-            match_title = str(bkfc_row[1])
-
-            if match_title.lower() == "nan":
-                continue
-
-            score_match = re.search(r"\d+:\d+", match_title)
-            score = score_match.group() if score_match else ""
-
-            opponent = (
-                match_title
-                .split("-")[-1]
-                .replace(score, "")
-                .strip()
-            )
-
-            matches.append({
-                "display": f"{bkfc_row[0]} | {opponent} | {bkfc_row[2]}",
-                "row_idx": i,
-                "opponent": opponent,
-                "date": str(bkfc_row[0])
-            })
-
-        except Exception:
-            continue
-
-    return matches
-
-
-# --------------------------------------------------
-# CORE MATCH LOADER (UPDATED)
-# --------------------------------------------------
-
-def load_match_data(bkfc_file, opponent_file, selected_row):
-    """
-    Loads a specific match using dropdown selection.
-    """
-
-    bkfc_file.seek(0)
-    opponent_file.seek(0)
-
-    bkfc_df = pd.read_excel(
-        bkfc_file,
-        header=None,
-        engine="openpyxl"
-    )
-
-    opp_df = pd.read_excel(
-        opponent_file,
-        header=None,
-        engine="openpyxl"
-    )
-
-    # Season baselines
+    # ── BASELINE ROWS ───────────────────────────────────────
     bkfc_season_avg = bkfc_df.iloc[1]
     all_opp_avg = bkfc_df.iloc[2]
-
-    # Match-specific rows
-    match_bkfc = bkfc_df.iloc[selected_row]
-    match_opp = bkfc_df.iloc[selected_row + 1]
-
-    # Opponent season baseline (from opponent file)
     opp_season_avg = opp_df.iloc[1]
 
-    # Metadata parsing
-    match_title = str(match_bkfc[1])
-    competition = str(match_bkfc[2])
-    match_date = str(match_bkfc[0])
+    # ── MATCH ROW DETECTION ────────────────────────────────
+    matches = []
 
-    score_match = re.search(r"\d+:\d+", match_title)
-    score = score_match.group() if score_match else ""
+    for i in range(3, len(bkfc_df)):
+        row = bkfc_df.iloc[i]
 
-    opponent_name = (
-        match_title
-        .split("-")[-1]
-        .replace(score, "")
-        .strip()
-    )
+        # skip empty rows
+        if pd.isna(row[0]) or pd.isna(row[1]):
+            continue
+
+        match_title = str(row[1])
+        match_date = str(row[0])
+        competition = str(row[2])
+
+        # only keep actual match rows
+        if "-" not in match_title:
+            continue
+
+        # extract score
+        score = ""
+        m = re.search(r"\d+:\d+", match_title)
+        if m:
+            score = m.group()
+
+        opponent_name = match_title.split("-")[-1].replace(score, "").strip()
+
+        matches.append({
+            "match_index": i,
+            "match_title": match_title,
+            "match_date": match_date,
+            "competition": competition,
+            "score": score,
+            "opponent_name": opponent_name,
+            "match_row": row
+        })
+
+    if not matches:
+        raise ValueError("No match rows detected in BKFC file.")
+
+    # default = most recent match
+    selected = matches[-1]
 
     return {
-        "match_title": match_title,
-        "match_date": match_date,
-        "competition": competition,
-        "score": score,
-        "opponent_name": opponent_name,
+        "matches": matches,
+        "selected_match": selected,
         "bkfc_season_avg": bkfc_season_avg,
         "all_opp_avg": all_opp_avg,
-        "match_bkfc": match_bkfc,
-        "match_opp": match_opp,
         "opp_season_avg": opp_season_avg
+    }
+
+
+# ── HELPER: build full report-ready structure ──────────────
+def build_match_data(parsed_data, opponent_file):
+    """
+    Converts selected match into report generator format
+    """
+    opp_df = pd.read_excel(opponent_file, header=None, engine="openpyxl")
+
+    match = parsed_data["selected_match"]
+    bkfc_row = match["match_row"]
+
+    # opponent row in BKFC dataset (same match, second row)
+    match_index = match["match_index"]
+    opp_row = parsed_data["all_opp_avg"]  # fallback safety baseline
+
+    return {
+        "match_title": match["match_title"],
+        "match_date": match["match_date"],
+        "competition": match["competition"],
+        "score": match["score"],
+        "opponent_name": match["opponent_name"],
+
+        "bkfc_season_avg": parsed_data["bkfc_season_avg"],
+        "all_opp_avg": parsed_data["all_opp_avg"],
+        "opp_season_avg": parsed_data["opp_season_avg"],
+
+        "match_bkfc": bkfc_row,
+        "match_opp": opp_row,   # fallback baseline opponent context
     }
